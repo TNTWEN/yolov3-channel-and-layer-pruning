@@ -4,7 +4,7 @@
 1. 底层更新为基于新版本[ultralytics/yolov3](https://github.com/ultralytics/yolov3)实现
 2. 加入mish-cuda支持：请先安装https://github.com/JunnYu/mish-cuda ，测试平台：WIN10+RTX3090+CUDA11.2
 3. 支持yolov4-tiny与yolov4-tiny-3l的通道剪枝。
-4. 提示：pytorch 与darknet训练方式存在差异，若想在OpenVINO端部署，为了更好的检测效果，请将剪枝后的cfg在[darknet](https://github.com/AlexeyAB/darknet)框架下不加载预训练权重就行微调。
+4. 提示：pytorch 与darknet训练方式存在差异，若想在OpenVINO端部署，为了更好的检测效果，请将剪枝后的cfg在[darknet](https://github.com/AlexeyAB/darknet)框架下不加载预训练权重进行微调。
 
 
 
