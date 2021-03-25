@@ -23,22 +23,39 @@ if __name__ == '__main__':
 
     img_size = opt.img_size
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     model = Darknet(opt.cfg, (img_size, img_size)).to(device)
+    #+++++++++++++++++++++++++ insert +++++++++++++++++++++++++#
+    model.hyperparams["cfg_path"]=opt.cfg
+    #+++++++++++++++++++++++++ insert end++++++++++++++++++++++# 
+    
     if opt.weights.endswith('.pt'):
         model.load_state_dict(torch.load(opt.weights)['model'])
     else:
         load_darknet_weights(model, opt.weights)
     print('\nloaded weights from ',opt.weights)
 
+    #+++++++++++++++++++++++++ insert +++++++++++++++++++++++++#
+    """
     eval_model = lambda model:test(opt.cfg, opt.data, 
         weights=opt.weights, 
         batch_size=16,
-         img_size=img_size,
-         iou_thres=0.5,
-         conf_thres=0.001,
-         nms_thres=0.5,
-         save_json=False,
-         model=model)
+        img_size=img_size,
+        iou_thres=0.5,
+        conf_thres=0.001,
+        nms_thres=0.5,
+        save_json=False,
+        model=model)
+    """
+    eval_model = lambda model:test(opt.cfg, opt.data, 
+                weights=opt.weights, 
+                batch_size=16,
+                imgsz=img_size,
+                iou_thres=0.5,
+                conf_thres=0.001,
+                save_json=False,
+                model=model)
+    #+++++++++++++++++++++++++ insert end++++++++++++++++++++++#
     obtain_num_parameters = lambda model:sum([param.nelement() for param in model.parameters()])
 
     print("\nlet's test the original model first:")
@@ -155,6 +172,8 @@ if __name__ == '__main__':
     #%%
     compact_model = Darknet([model.hyperparams.copy()] + compact_module_defs, (img_size, img_size)).to(device)
     compact_nparameters = obtain_num_parameters(compact_model)
+
+
 
     init_weights_from_loose_model(compact_model, pruned_model, CBL_idx, Conv_idx, CBLidx2mask)
 

@@ -22,29 +22,54 @@ if __name__ == '__main__':
 
     img_size = opt.img_size
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = Darknet(opt.cfg, (img_size, img_size)).to(device)
+    model = Darknet(opt.cfg, (img_size, img_size)).to(device) # 根据配置文件生成模型
+    #+++++++++++++++++++++++++ insert +++++++++++++++++++++++++#
+    model.hyperparams["cfg_path"]=opt.cfg
+    #+++++++++++++++++++++++++ insert end++++++++++++++++++++++# 
 
     if opt.weights.endswith(".pt"):
-        model.load_state_dict(torch.load(opt.weights, map_location=device)['model'])
+        model.load_state_dict(torch.load(opt.weights, map_location=device)['model']) # 加载pytorch默认格式的模型参数
     else:
-        _ = load_darknet_weights(model, opt.weights)
+        _ = load_darknet_weights(model, opt.weights) # 加载darknet格式的模型参数
     print('\nloaded weights from ',opt.weights)
 
+    #+++++++++++++++++++++++++ insert +++++++++++++++++++++++++#
+    """
+    eval_model = lambda model:test(model=model,cfg=opt.cfg, data=opt.data, batch_size=16, img_size=img_size) # 用于模型测试的lambda函数
+    """
+    eval_model = lambda model:test(opt.cfg, opt.data, 
+                weights=opt.weights, 
+                batch_size=16,
+                imgsz=img_size,
+                iou_thres=0.5,
+                conf_thres=0.001,
+                save_json=False,
+                model=model)
+    #+++++++++++++++++++++++++ insert end++++++++++++++++++++++#
 
-    eval_model = lambda model:test(model=model,cfg=opt.cfg, data=opt.data, batch_size=16, img_size=img_size)
-    obtain_num_parameters = lambda model:sum([param.nelement() for param in model.parameters()])
+    obtain_num_parameters = lambda model:sum([param.nelement() for param in model.parameters()]) # 用于获取模型参数数量的lambda函数
 
     print("\nlet's test the original model first:")
     with torch.no_grad():
-        origin_model_metric = eval_model(model)
-    origin_nparameters = obtain_num_parameters(model)
+        origin_model_metric = eval_model(model) # 对未剪枝的模型进行测试
+    origin_nparameters = obtain_num_parameters(model) # 获取未剪枝模型的参数数量
 
-    CBL_idx, Conv_idx, prune_idx,shortcut_idx,shortcut_all= parse_module_defs2(model.module_defs)
+    """
+    CBL_idx = [] # 包含BN层的卷积模块的索引列表（CBL: Conv-Bn-Leaky_relu）
+    Conv_idx = [] # 不包含BN层的卷积模块的索引列表
 
+    ignore_idx = set() # 不能够被剪枝的卷积模块的索引列表（spp前一个CBL不剪,上采样层前的卷积模块，...）
+    prune_idx = [idx for idx in CBL_idx if idx not in ignore_idx] # 能够被剪枝的模块（包含BN层但是不在ignore_idx里的卷积模块）
 
-    sort_prune_idx=[idx for idx in prune_idx if idx not in shortcut_idx]
+    shortcut_idx=dict() # (key,value),其中key，value为一对生成shortcut模块的两个输入特征图的卷积模块，key为直连接，value为跨层连接
+    shortcut_all=set() # 生成shortcut模块的输入特征图的卷积模块的索引集合，每个shortcut模块对应两个这样的卷积模块
+    """
+    CBL_idx, Conv_idx, prune_idx,shortcut_idx,shortcut_all= parse_module_defs2(model.module_defs) # 对模型进行解析
 
-    #将所有要剪枝的BN层的α参数，拷贝到bn_weights列表
+    # 从能够被剪枝的模块中去掉生成shortcut直连输入特征图的卷积模块，注意这里的sort_prune_idx依然包含生成shortcut跨层输入特征图的卷积模块
+    sort_prune_idx=[idx for idx in prune_idx if idx not in shortcut_idx] 
+
+    #将所有要剪枝的BN层的gamma系数，拷贝到bn_weights列表
     bn_weights = gather_bn_weights(model.module_list, sort_prune_idx)
 
     #torch.sort返回二维列表，第一维是排序后的值列表，第二维是排序后的值列表对应的索引
@@ -68,37 +93,41 @@ if __name__ == '__main__':
     def prune_and_eval(model, sorted_bn, percent=.0):
         model_copy = deepcopy(model)
         thre_index = int(len(sorted_bn) * percent)
-        #获得α参数的阈值，小于该值的α参数对应的通道，全部裁剪掉
+        #获得gamma系数的阈值，小于该值的gamma系数对应的通道，全部裁剪掉
         thre1 = sorted_bn[thre_index]
 
         print(f'Channels with Gamma value less than {thre1:.6f} are pruned!')
 
         remain_num = 0
-        idx_new=dict()
-        for idx in prune_idx:
+        idx_new=dict() # (key,value): key为模块idx，value为模块的剪枝掩码数组（元素值为1代表该滤波器保留，为0代表剪枝）
+        for idx in prune_idx: # 这里的prune_idx是包含生成shortcut输入的卷积模块
             
-            if idx not in shortcut_idx:
+            if idx not in shortcut_idx: # 当idx不是生成shortcut输入的卷积模块
                 
                 bn_module = model_copy.module_list[idx][1]
 
-                mask = obtain_bn_mask(bn_module, thre1)
+                mask = obtain_bn_mask(bn_module, thre1) # 根据thre1判断当前模块中的哪些输出通道需要被剪枝（通过设置掩码为0来表示该滤波器被剪枝了）
                 #记录剪枝后，每一层卷积层对应的mask
                 # idx_new[idx]=mask.cpu().numpy()
-                idx_new[idx]=mask
-                remain_num += int(mask.sum())
-                bn_module.weight.data.mul_(mask)
+                idx_new[idx]=mask # 记录当前模块的剪枝掩码
+
+                remain_num += int(mask.sum()) # 未被剪枝的输出通道数目
+                bn_module.weight.data.mul_(mask) # 将被剪枝的输出通道对应的gamma系数置为0
                 #bn_module.bias.data.mul_(mask*0.0001)
-            else:
+
+            else: 
+                # 当idx是生成shortcut的直连输入特征图的卷积模块（注意，这里就是与prune.py不同的关键了!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!）
+                # 即当shortcut跨层连接中的某个输出通道被剪枝了，那么对应的shortcut直连接中对应的输出通道也要被剪枝（前面剪完，后面对应也要剪）
                 
                 bn_module = model_copy.module_list[idx][1]
                
-
-                mask=idx_new[shortcut_idx[idx]]
-                idx_new[idx]=mask
-                
+                # shortcut_idx[idx]为生成shortcut跨层输入特征图的卷积模块的索引
+                # idx_new[shortcut_idx[idx]]代表生成shortcut跨层输入特征图的卷积模块对应的剪枝掩码数组
+                mask=idx_new[shortcut_idx[idx]] 
+                idx_new[idx]=mask # 记录当前模块的剪枝掩码
      
-                remain_num += int(mask.sum())
-                bn_module.weight.data.mul_(mask)
+                remain_num += int(mask.sum()) # 未被剪枝的输出通道数目 （理论上这里的这行代码应该要删除，因为shortcut直连接中对应的输出通道不被包含于sorted_bn）
+                bn_module.weight.data.mul_(mask) # 将被剪枝的输出通道对应的gamma系数置为0
                 
             #print(int(mask.sum()))
 
@@ -182,14 +211,11 @@ if __name__ == '__main__':
     #CBLidx2mask存储CBL_idx中，每一层BN层对应的mask
     CBLidx2mask = {idx: mask for idx, mask in zip(CBL_idx, filters_mask)}
 
-
     pruned_model = prune_model_keep_size2(model, prune_idx, CBL_idx, CBLidx2mask)
     print("\nnow prune the model but keep size,(actually add offset of BN beta to next layer), let's see how the mAP goes")
 
     with torch.no_grad():
         eval_model(pruned_model)
-
-
 
     #获得原始模型的module_defs，并修改该defs中的卷积核数量
     compact_module_defs = deepcopy(model.module_defs)

@@ -1,4 +1,21 @@
 # yolov3-channel-and-layer-pruning
+本仓库在[tanluren/yolov3-channel-and-layer-pruning](https://github.com/tanluren/yolov3-channel-and-layer-pruning)项目基础上改进，使用方法相同，更新日志如下：
+
+1. 底层更新为基于新版本[ultralytics/yolov3](https://github.com/ultralytics/yolov3)实现
+2. 加入mish-cuda支持：请先安装https://github.com/JunnYu/mish-cuda ，测试平台：WIN10+RTX3090+CUDA11.2
+3. 支持yolov4-tiny与yolov4-tiny-3l的通道剪枝。
+4. 提示：pytorch 与darknet训练方式存在差异，若想在OpenVINO端部署，为了更好的检测效果，请将剪枝后的cfg在[darknet](https://github.com/AlexeyAB/darknet)框架下不加载预训练权重就行微调。
+
+
+
+
+
+
+
+------
+
+以下为[tanluren/yolov3-channel-and-layer-pruning](https://github.com/tanluren/yolov3-channel-and-layer-pruning)README内容，
+
 本项目以[ultralytics/yolov3](https://github.com/ultralytics/yolov3)为基础实现，根据论文[Learning Efficient Convolutional Networks Through Network Slimming (ICCV 2017)](http://openaccess.thecvf.com/content_iccv_2017/html/Liu_Learning_Efficient_Convolutional_ICCV_2017_paper.html)原理基于bn层Gmma系数进行通道剪枝，下面引用了几种不同的通道剪枝策略，并对原策略进行了改进，提高了剪枝率和精度；在这些工作基础上，又衍生出了层剪枝，本身通道剪枝已经大大减小了模型参数和计算量，降低了模型对资源的占用，而层剪枝可以进一步减小了计算量，并大大提高了模型推理速度；通过层剪枝和通道剪枝结合，可以压缩模型的深度和宽度，某种意义上实现了针对不同数据集的小模型搜索。<br>
 <br>
 项目的基本工作流程是，使用yolov3训练自己数据集，达到理想精度后进行稀疏训练，稀疏训练是重中之重，对需要剪枝的层对应的bn gamma系数进行大幅压缩，理想的压缩情况如下图，然后就可以对不重要的通道或者层进行剪枝，剪枝后可以对模型进行微调恢复精度，后续会写篇博客记录一些实验过程及调参经验，在此感谢[行云大佬](https://github.com/zbyuan)的讨论和合作！<br>

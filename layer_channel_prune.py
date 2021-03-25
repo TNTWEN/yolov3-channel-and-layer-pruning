@@ -26,6 +26,9 @@ if __name__ == '__main__':
     img_size = opt.img_size
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = Darknet(opt.cfg, (img_size, img_size)).to(device)
+    #+++++++++++++++++++++++++ insert +++++++++++++++++++++++++#
+    model.hyperparams["cfg_path"]=opt.cfg
+    #+++++++++++++++++++++++++ insert end++++++++++++++++++++++# 
 
     if opt.weights.endswith(".pt"):
         model.load_state_dict(torch.load(opt.weights, map_location=device)['model'])
@@ -34,7 +37,20 @@ if __name__ == '__main__':
     print('\nloaded weights from ',opt.weights)
 
 
-    eval_model = lambda model:test(model=model, cfg=opt.cfg, data=opt.data, batch_size=16, img_size=img_size)
+    #+++++++++++++++++++++++++ insert +++++++++++++++++++++++++#
+    """
+    eval_model = lambda model:test(model=model,cfg=opt.cfg, data=opt.data, batch_size=16, img_size=img_size) # 用于模型测试的lambda函数
+    """
+    eval_model = lambda model:test(opt.cfg, opt.data, 
+                weights=opt.weights, 
+                batch_size=16,
+                imgsz=img_size,
+                iou_thres=0.5,
+                conf_thres=0.001,
+                save_json=False,
+                model=model)
+    #+++++++++++++++++++++++++ insert end++++++++++++++++++++++#
+    
     obtain_num_parameters = lambda model:sum([param.nelement() for param in model.parameters()])
 
     print("\nlet's test the original model first:")
@@ -200,9 +216,6 @@ if __name__ == '__main__':
     print('These shortcut layers and corresponding CBL will be pruned :', index_prune)
 
 
-
-
-
     def prune_and_eval2(model, prune_shortcuts=[]):
         model_copy = deepcopy(model)
         for idx in prune_shortcuts:
@@ -220,9 +233,6 @@ if __name__ == '__main__':
 
 
     prune_and_eval2(compact_model1, prune_shortcuts)
-
-
-
 
 
     #%%
@@ -255,39 +265,62 @@ if __name__ == '__main__':
 
     compact_module_defs = deepcopy(compact_model1.module_defs)
 
-                
-    for j, module_def in enumerate(compact_module_defs):    
+    #+++++++++++++++++++++++++ insert +++++++++++++++++++++++++#
+    """
+    for module_def in compact_module_defs:
         if module_def['type'] == 'route':
             from_layers = [int(s) for s in module_def['layers'].split(',')]
-            if len(from_layers) == 1 and from_layers[0] > 0:
+            if len(from_layers) == 2:
                 count = 0
                 for i in index_prune:
+                    if i <= from_layers[1]:
+                        count += 1
+                from_layers[1] = from_layers[1] - count
+                from_layers = ', '.join([str(s) for s in from_layers])
+                module_def['layers'] = from_layers
+    """
+    for j, module_def in enumerate(compact_module_defs):    
+        if module_def['type'] == 'route':
+            from_layers = module_def['layers']
+
+            if len(from_layers) == 1 and from_layers[0] > 0: # route层为单输入时
+                count = 0
+                for i in index_prune: # 统计单输入的route层前面有多少个模块被剪枝了
                     if i <= from_layers[0]:
                         count += 1
-                from_layers[0] = from_layers[0] - count
-                from_layers = str(from_layers[0])
-                module_def['layers'] = from_layers
+                from_layers[0] = from_layers[0] - count 
+                module_def['layers'] = from_layers # 修改route层的‘layers’配置参数
 
-            elif len(from_layers) == 2:
+            elif len(from_layers) == 2: # route层为双输入时
                 count = 0
                 if from_layers[1] > 0:
                     for i in index_prune:
-                        if i <= from_layers[1]:
+                        if i <= from_layers[1]: # 被剪枝的模块在route层的前面
                             count += 1
                     from_layers[1] = from_layers[1] - count
                 else:
                     for i in index_prune:
-                        if i > j + from_layers[1] and i < j:
+                        if i > j + from_layers[1] and i < j: # 被剪枝的模块在route层的后面
                             count += 1
                     from_layers[1] = from_layers[1] + count
 
-                from_layers = ', '.join([str(s) for s in from_layers])
                 module_def['layers'] = from_layers
+    #+++++++++++++++++++++++++ insert end++++++++++++++++++++++#
 
     compact_module_defs = [compact_module_defs[i] for i in index_remain]
     compact_model2 = Darknet([compact_model1.hyperparams.copy()] + compact_module_defs, (img_size, img_size)).to(device)
+
+    #+++++++++++++++++++++++++ insert +++++++++++++++++++++++++#
+    """
     for i, index in enumerate(index_remain):
         compact_model2.module_list[i] = pruned_model.module_list[index]
+    """
+    for i, index in enumerate(index_remain):
+        compact_model2.module_list[i] = deepcopy(pruned_model.module_list[index]) # 将原模型的参数拷贝到剪枝完成后的紧凑模型中
+        if compact_module_defs[i]['type'] == 'route':
+            compact_model2.module_list[i].multiple = len(compact_module_defs[i]['layers']) > 1
+            compact_model2.module_list[i].layers = compact_module_defs[i]['layers']
+    #+++++++++++++++++++++++++ insert end++++++++++++++++++++++#
 
     compact_nparameters2 = obtain_num_parameters(compact_model2)
 
@@ -322,8 +355,6 @@ if __name__ == '__main__':
     compact_forward_time2, compact_output2 = obtain_avg_forward_time(random_input, compact_model2)
 
 
-
-    
 
 
     metric_table = [

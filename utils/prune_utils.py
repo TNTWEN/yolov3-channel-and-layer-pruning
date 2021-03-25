@@ -17,10 +17,14 @@ def parse_module_defs(module_defs):
     ignore_idx = set()
     for i, module_def in enumerate(module_defs):
         if module_def['type'] == 'convolutional':
-            if module_def['batch_normalize'] == '1':
+            #+++++++++++++++++++++++++ insert +++++++++++++++++++++++++#
+            # if module_def['batch_normalize'] == '1':
+            if module_def['batch_normalize'] == 1:
                 CBL_idx.append(i)
             else:
                 Conv_idx.append(i)
+            #+++++++++++++++++++++++++ insert end++++++++++++++++++++++#
+
             if module_defs[i+1]['type'] == 'maxpool' and module_defs[i+2]['type'] == 'route':
                 #spp前一个CBL不剪 区分tiny
                 ignore_idx.add(i)
@@ -29,7 +33,12 @@ def parse_module_defs(module_defs):
 
         elif module_def['type'] == 'shortcut':
             ignore_idx.add(i-1)
-            identity_idx = (i + int(module_def['from']))
+
+            #+++++++++++++++++++++++++ insert +++++++++++++++++++++++++#
+            # identity_idx = (i + int(module_def['from'])) # shortcut的跨层连接对应的模块的索引
+            identity_idx = (i + int(module_def['from'][0])) # shortcut的跨层连接对应的模块的索引
+            #+++++++++++++++++++++++++ insert end++++++++++++++++++++++#
+
             if module_defs[identity_idx]['type'] == 'convolutional':
                 ignore_idx.add(identity_idx)
             elif module_defs[identity_idx]['type'] == 'shortcut':
@@ -47,17 +56,21 @@ def parse_module_defs(module_defs):
 
 def parse_module_defs2(module_defs):
 
-    CBL_idx = []
-    Conv_idx = []
-    shortcut_idx=dict()
-    shortcut_all=set()
-    ignore_idx = set()
+    CBL_idx = [] # 包含BN层的卷积模块的索引列表（CBL: Conv-Bn-Leaky_relu）
+    Conv_idx = [] # 不包含BN层的卷积模块的索引列表
+    shortcut_idx=dict() # (key,value),其中key，value为一对生成一个shortcut模块的两个输入特征图的卷积模块，key为直连接，value为跨层连接
+    shortcut_all=set() # 生成shortcut模块的输入特征图的卷积模块的索引集合，每个shortcut模块对应两个这样的卷积模块
+    ignore_idx = set() # 不能够被剪枝的卷积模块的索引集合（spp前一个CBL不剪,上采样层前的卷积模块，...）
     for i, module_def in enumerate(module_defs):
         if module_def['type'] == 'convolutional':
-            if module_def['batch_normalize'] == '1':
+            #+++++++++++++++++++++++++ insert +++++++++++++++++++++++++#
+            # if module_def['batch_normalize'] == '1':
+            if module_def['batch_normalize'] == 1: 
                 CBL_idx.append(i)
             else:
                 Conv_idx.append(i)
+            #+++++++++++++++++++++++++ insert end++++++++++++++++++++++#
+
             if module_defs[i+1]['type'] == 'maxpool' and module_defs[i+2]['type'] == 'route':
                 #spp前一个CBL不剪 区分spp和tiny
                 ignore_idx.add(i)
@@ -69,22 +82,23 @@ def parse_module_defs2(module_defs):
             ignore_idx.add(i - 1)
 
         elif module_def['type'] == 'shortcut':
-            identity_idx = (i + int(module_def['from']))
-            if module_defs[identity_idx]['type'] == 'convolutional':
-                
+            #+++++++++++++++++++++++++ insert +++++++++++++++++++++++++#
+            # identity_idx = (i + int(module_def['from'])) # shortcut的跨层连接对应的模块的索引
+            identity_idx = (i + int(module_def['from'][0])) # shortcut的跨层连接对应的模块的索引 from=-3
+            #+++++++++++++++++++++++++ insert end++++++++++++++++++++++#
+
+            if module_defs[identity_idx]['type'] == 'convolutional': # shortcut的跨层连接对应的模块为卷积模块
                 #ignore_idx.add(identity_idx)
-                shortcut_idx[i-1]=identity_idx
-                shortcut_all.add(identity_idx)
-            elif module_defs[identity_idx]['type'] == 'shortcut':
+                shortcut_idx[i-1]=identity_idx # shortcut前一层的卷积模块和shortcut跨层连接对应的卷积模块构成一对(key,value)
+                shortcut_all.add(identity_idx) # 将shortcut跨层连接对应的卷积模块添加入shortcut_all
+            elif module_defs[identity_idx]['type'] == 'shortcut': # shortcut的跨层连接对应的模块为shortcut模块
                 
                 #ignore_idx.add(identity_idx - 1)
-                shortcut_idx[i-1]=identity_idx-1
-                shortcut_all.add(identity_idx-1)
+                shortcut_idx[i-1]=identity_idx-1 # shortcut前一层的卷积模块和“shortcut跨层连接对应的shortcut模块的前一层的卷积模块”构成一对(key,value)
+                shortcut_all.add(identity_idx-1) # 将shortcut跨层连接对应的shortcut模块的前一层的卷积模块添加入shortcut_all
             shortcut_all.add(i-1)
-        
-    
 
-    prune_idx = [idx for idx in CBL_idx if idx not in ignore_idx]
+    prune_idx = [idx for idx in CBL_idx if idx not in ignore_idx] # 能够被剪枝的模块（包含BN层但是不在ignore_idx里的卷积模块）
 
     return CBL_idx, Conv_idx, prune_idx,shortcut_idx,shortcut_all
 
@@ -94,13 +108,16 @@ def parse_module_defs4(module_defs):
 
     CBL_idx = []
     Conv_idx = []
-    shortcut_idx= []
+    shortcut_idx= [] # shortcut前一层的卷积模块
     for i, module_def in enumerate(module_defs):
         if module_def['type'] == 'convolutional':
-            if module_def['batch_normalize'] == '1':
+            #+++++++++++++++++++++++++ insert +++++++++++++++++++++++++#
+            # if module_def['batch_normalize'] == '1':
+            if module_def['batch_normalize'] == 1: 
                 CBL_idx.append(i)
             else:
                 Conv_idx.append(i)
+            #+++++++++++++++++++++++++ insert end++++++++++++++++++++++#
         elif module_def['type'] == 'shortcut':
             shortcut_idx.append(i-1)
 
@@ -134,6 +151,12 @@ def write_cfg(cfg_file, module_defs):
                 if key != 'type':
                     if key == 'anchors':
                         value = ', '.join(','.join(str(int(i)) for i in j) for j in value)
+
+                    #+++++++++++++++++++++++++ insert +++++++++++++++++++++++++#
+                    if (key in ['from', 'layers', 'mask']) or (key == 'size' and not isinstance(value,int) ):
+                        value = ', '.join(str(i) for i in value)
+                    #+++++++++++++++++++++++++ insert end++++++++++++++++++++++#
+
                     f.write(f"{key}={value}\n")
             f.write("\n")
     return cfg_file
@@ -182,11 +205,15 @@ def get_input_mask(module_defs, idx, CBLidx2mask):
         return CBLidx2mask[idx - 2]
     elif module_defs[idx - 1]['type'] == 'route':
         route_in_idxs = []
-        for layer_i in module_defs[idx - 1]['layers'].split(","):
+
+        #+++++++++++++++++++++++++ insert +++++++++++++++++++++++++#
+        # for layer_i in module_defs[idx - 1]['layers'].split(","):
+        for layer_i in module_defs[idx - 1]['layers']:
             if int(layer_i) < 0:
                 route_in_idxs.append(idx - 1 + int(layer_i))
             else:
                 route_in_idxs.append(int(layer_i))
+        #+++++++++++++++++++++++++ insert end++++++++++++++++++++++#
 
         if len(route_in_idxs) == 1:
             mask = CBLidx2mask[route_in_idxs[0]]
@@ -293,15 +320,15 @@ def obtain_bn_mask(bn_module, thre):
 
 def update_activation(i, pruned_model, activation, CBL_idx):
     next_idx = i + 1
-    if pruned_model.module_defs[next_idx]['type'] == 'convolutional':
+    if pruned_model.module_defs[next_idx]['type'] == 'convolutional':#下一个模块是CBL
         next_conv = pruned_model.module_list[next_idx][0]
         conv_sum = next_conv.weight.data.sum(dim=(2, 3))
         offset = conv_sum.matmul(activation.reshape(-1, 1)).reshape(-1)
-        if next_idx in CBL_idx:
+        if next_idx in CBL_idx:#下一个模块是CBL
             next_bn = pruned_model.module_list[next_idx][1]
-            next_bn.running_mean.data.sub_(offset)
+            next_bn.running_mean.data.sub_(offset) #bn层的running(moving)-cov(activation)
         else:
-            next_conv.bias.data.add_(offset)
+            next_conv.bias.data.add_(offset) #下一个是CL,cov(activation)加到cov的bias
 
 
 
@@ -314,10 +341,10 @@ def prune_model_keep_size2(model, prune_idx, CBL_idx, CBLidx2mask):
         if model_def['type'] == 'convolutional':
             activation = torch.zeros(int(model_def['filters'])).cuda()
             if i in prune_idx:
-                mask = torch.from_numpy(CBLidx2mask[i]).cuda()
+                mask = torch.from_numpy(CBLidx2mask[i]).cuda()#之前变成numpy了
                 bn_module = pruned_model.module_list[i][1]
-                bn_module.weight.data.mul_(mask)
-                if model_def['activation'] == 'leaky':
+                bn_module.weight.data.mul_(mask)#加mask
+                if model_def['activation'] == 'leaky':#把bn的beta（bias）放入CBL的激活函数，输出，往下传递
                     activation = F.leaky_relu((1 - mask) * bn_module.bias.data, 0.1)
                 elif model_def['activation'] == 'mish':
                     activation = (1 - mask) * bn_module.bias.data.mul(F.softplus(bn_module.bias.data).tanh())
@@ -327,7 +354,10 @@ def prune_model_keep_size2(model, prune_idx, CBL_idx, CBLidx2mask):
 
         elif model_def['type'] == 'shortcut':
             actv1 = activations[i - 1]
-            from_layer = int(model_def['from'])
+            #+++++++++++++++++++++++++ insert +++++++++++++++++++++++++#
+            # from_layer = int(model_def['from'])
+            from_layer = int(model_def['from'][0])
+            #+++++++++++++++++++++++++ insert end++++++++++++++++++++++#
             actv2 = activations[i + from_layer]
             activation = actv1 + actv2
             update_activation(i, pruned_model, activation, CBL_idx)
@@ -337,12 +367,15 @@ def prune_model_keep_size2(model, prune_idx, CBL_idx, CBLidx2mask):
 
         elif model_def['type'] == 'route':
             #spp不参与剪枝，其中的route不用更新，仅占位
-            from_layers = [int(s) for s in model_def['layers'].split(',')]
+            #+++++++++++++++++++++++++ insert +++++++++++++++++++++++++#
+            # from_layers = [int(s) for s in model_def['layers'].split(',')]
+            from_layers = model_def['layers']
+            #+++++++++++++++++++++++++ insert end++++++++++++++++++++++#
             activation = None
             if len(from_layers) == 1:
                 activation = activations[i + from_layers[0] if from_layers[0] < 0 else from_layers[0]]
                 if 'groups' in model_def:
-                    activation = activation[(activation.shape[0]//2):]
+                    activation = activation[(activation.shape[0]//2):]                
                 update_activation(i, pruned_model, activation, CBL_idx)
             elif len(from_layers) == 2:
                 actv1 = activations[i + from_layers[0]]
@@ -411,15 +444,16 @@ def get_mask2(model, prune_idx, percent):
     return prune2mask
                     
 def merge_mask(model, CBLidx2mask, CBLidx2filters):
-    for i in range(len(model.module_defs) - 1, -1, -1):
+    for i in range(len(model.module_defs) - 1, -1, -1): # 反向遍历模型的所有模块 len()-1,len()-2 ....0 共len个
         mtype = model.module_defs[i]['type']
         if mtype == 'shortcut': 
-            if model.module_defs[i]['is_access']: 
+            if model.module_defs[i]['is_access']: #如果是true 就跳过下面代码，直接下一个循环
                 continue
 
             Merge_masks =  []
             layer_i = i
-            while mtype == 'shortcut':
+            #while  shortcut的跨层还是shortcut，直到跨层是cov
+            while mtype == 'shortcut': # 将shortcut的直连和跨层连接和多级跨层连接的卷积模块的剪枝掩码添加到Merge_masks列表里
                 model.module_defs[layer_i]['is_access'] = True
 
                 if model.module_defs[layer_i-1]['type'] == 'convolutional': 
@@ -427,23 +461,34 @@ def merge_mask(model, CBLidx2mask, CBLidx2filters):
                     if bn: 
                         Merge_masks.append(CBLidx2mask[layer_i-1].unsqueeze(0))
 
-                layer_i = int(model.module_defs[layer_i]['from'])+layer_i 
-                mtype = model.module_defs[layer_i]['type']
+                #+++++++++++++++++++++++++ insert +++++++++++++++++++++++++#
+                # layer_i = int(model.module_defs[layer_i]['from'])+layer_i 
+                layer_i = int(model.module_defs[layer_i]['from'][0])+layer_i #跳转到from处
+                #+++++++++++++++++++++++++ insert end++++++++++++++++++++++#
 
-                if mtype == 'convolutional':              
+                mtype = model.module_defs[layer_i]['type']#from处的层
+                #若if通过，则与这个shortcut都关联需要共享mask的就找全了   这个cov就是用来调整下一块区域的通道
+                if mtype == 'convolutional':    #对这个cov处理，并不再循环，否则循环到找到cov为止
                     bn = int(model.module_defs[layer_i]['batch_normalize'])
                     if bn: 
                         Merge_masks.append(CBLidx2mask[layer_i].unsqueeze(0))
-   
-                
+
+
+
+                #shortcut直连层与跨层连接的shortcut(conv),通道数都是一样的  如size是[num]
             if len(Merge_masks) > 1:
-                Merge_masks = torch.cat(Merge_masks, 0)
-                merge_mask = (torch.sum(Merge_masks, dim=0) > 0).float()
+                Merge_masks = torch.cat(Merge_masks, 0)#list 拼成n*num的tensor
+                """
+                重点：
+                    * 剪枝掩码对1求并集，即但凡有一个卷积模块中的某个位置的输出通道不被剪枝，则所有卷积模块在该位置的输出通道都不被剪枝
+                    * 即剪枝掩码对0求交集,即只有所有卷积模块在某个位置的输出通道被剪枝，则所有卷积模块在该位置的输出通道才能被剪枝
+                """
+                merge_mask = (torch.sum(Merge_masks, dim=0) > 0).float() #所有行对应位置相加，有一个1就只能全部保留
             else:
                 merge_mask = Merge_masks[0].float()
 
             layer_i = i
-            mtype = 'shortcut'
+            mtype = 'shortcut'#更新这一组相关的BN通道
             while mtype == 'shortcut':
 
                 if model.module_defs[layer_i-1]['type'] == 'convolutional': 
@@ -452,7 +497,11 @@ def merge_mask(model, CBLidx2mask, CBLidx2filters):
                         CBLidx2mask[layer_i-1] = merge_mask
                         CBLidx2filters[layer_i-1] = int(torch.sum(merge_mask).item())
 
-                layer_i = int(model.module_defs[layer_i]['from'])+layer_i 
+                #+++++++++++++++++++++++++ insert +++++++++++++++++++++++++#
+                # layer_i = int(model.module_defs[layer_i]['from'])+layer_i 
+                layer_i = int(model.module_defs[layer_i]['from'][0])+layer_i 
+                #+++++++++++++++++++++++++ insert end++++++++++++++++++++++#
+                
                 mtype = model.module_defs[layer_i]['type']
 
                 if mtype == 'convolutional': 
